@@ -118,5 +118,21 @@
 	END;$$
 	LANGUAGE PLPGSQL;
 	
-	
-	
+	CREATE OR REPLACE FUNCTION kNNQuery (_tbl regclass, center_id integer, k_neigh integer, metric TEXT) RETURNS SETOF genericQuery AS $$
+	DECLARE sql text;
+	BEGIN
+		IF UPPER(metric) = 'L1' THEN
+			sql := format('SELECT * FROM (SELECT T2.ID_FT, (cube(T1.feature) <#> cube(T2.feature)) AS dist FROM %s T1, %s T2 WHERE T1.id_ft = %s AND T1.ID_FT <> T2.ID_FT) as quer ORDER BY dist LIMIT %s',_tbl, _tbl, center_id, k_neigh);
+		
+		ELSIF UPPER(metric) = 'L2' THEN
+			sql := format('SELECT * FROM (SELECT T2.ID_FT, (cube(T1.feature) <-> cube(T2.feature)) AS dist FROM %s T1, %s T2 WHERE T1.id_ft = %s AND T1.ID_FT <> T2.ID_FT) as quer ORDER BY dist LIMIT %s',_tbl, _tbl, center_id, k_neigh);
+		
+		ELSIF UPPER(metric) = 'LINF' THEN
+			sql := format('SELECT * FROM (SELECT T2.ID_FT, (cube(T1.feature) <=> cube(T2.feature)) AS dist FROM %s T1, %s T2 WHERE T1.id_ft = %s AND T1.ID_FT <> T2.ID_FT) as quer ORDER BY dist LIMIT %s',_tbl, _tbl, center_id, k_neigh);
+		
+		END IF;
+		
+		RETURN QUERY execute sql;
+		
+	END;$$
+	LANGUAGE PLPGSQL;
