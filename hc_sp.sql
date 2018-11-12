@@ -168,7 +168,7 @@ CREATE OR REPLACE FUNCTION rangeOmniHCL2F4 (center_id integer, radius FLOAT8) RE
 	LANGUAGE PLPGSQL;
 	
 CREATE OR REPLACE FUNCTION rangeOmniHCL2F5 (center_id integer, radius FLOAT8) RETURNS SETOF genericQuery AS $$
-	DECLARE rec_id RECORD; is_ok BOOLEAN := FALSE;feature_aux FLOAT8[]; distance FLOAT8; dist_fc FLOAT8[]; cand INTEGER := 0;
+	DECLARE rec_id RECORD;feature_aux FLOAT8[]; distance FLOAT8; dist_fc FLOAT8[]; cand INTEGER := 0;
 	BEGIN
 		
 		select T1.feature into feature_aux FROM HC_TABLE T1 where T1.cod = center_id;
@@ -240,4 +240,55 @@ CREATE OR REPLACE FUNCTION wipe_HC_focus_base() RETURNS VOID AS $$
 	END;$$
 	LANGUAGE PLPGSQL;
 	
-	(49268, 20)		
+	(49268, 20)
+
+CREATE OR REPLACE FUNCTION kNNq_HC_L2 (center_id integer, k_value INTEGER) RETURNS SETOF genericQuery AS $$
+	BEGIN
+		RETURN QUERY SELECT DISTINCT * FROM (SELECT T2.COD, (cube(T1.feature) <-> cube(T2.feature)) AS dist FROM HC_TABLE T1, HC_TABLE T2 WHERE T1.cod = center_id) as quer ORDER BY dist LIMIT k_value;
+	END;$$
+	LANGUAGE PLPGSQL;	
+
+CREATE OR REPLACE FUNCTION kNNOmniHCL2F1 (center_id INTEGER, k_value INTEGER) RETURNS SETOF genericQuery AS $$
+DECLARE radius FLOAT8 := 100;
+BEGIN
+	
+	RETURN QUERY SELECT * FROM rangeOMNIHCL2F1(center_id,radius) ORDER BY distance LIMIT k_value;
+			
+END;$$
+LANGUAGE PLPGSQL;
+
+CREATE OR REPLACE FUNCTION kNNOmniHCL2F2 (center_id INTEGER, k_value INTEGER) RETURNS SETOF genericQuery AS $$
+DECLARE radius FLOAT8 := 100;
+BEGIN
+	
+	RETURN QUERY SELECT * FROM rangeOMNIHCL2F2(center_id,radius) ORDER BY distance LIMIT k_value;
+			
+END;$$
+LANGUAGE PLPGSQL; 
+
+CREATE OR REPLACE FUNCTION kNNOmniHCL2F3 (center_id INTEGER, k_value INTEGER) RETURNS SETOF genericQuery AS $$
+DECLARE radius FLOAT8 := 100;
+BEGIN
+	
+	RETURN QUERY SELECT * FROM rangeOMNIHCL2F3(center_id,radius) ORDER BY distance LIMIT k_value;
+			
+END;$$
+LANGUAGE PLPGSQL; 
+
+CREATE OR REPLACE FUNCTION kNNOmniHCL2F4 (center_id INTEGER, k_value INTEGER) RETURNS SETOF genericQuery AS $$
+DECLARE radius FLOAT8 := 100;
+BEGIN
+	
+	RETURN QUERY SELECT * FROM rangeOMNIHCL2F4(center_id,radius) ORDER BY distance LIMIT k_value;
+			
+END;$$
+LANGUAGE PLPGSQL; 	
+
+CREATE OR REPLACE FUNCTION kNNOmniHCL2F5 (center_id INTEGER, k_value INTEGER) RETURNS SETOF genericQuery AS $$
+DECLARE radius FLOAT8 := 100;
+BEGIN
+	
+	RETURN QUERY SELECT * FROM rangeOMNIHCL2F5(center_id,radius) ORDER BY distance LIMIT k_value;
+			
+END;$$
+LANGUAGE PLPGSQL; 	
