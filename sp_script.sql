@@ -442,8 +442,23 @@ CREATE OR REPLACE FUNCTION wipe_shape_focus_base () RETURNS VOID AS $$
 	END;$$
 	LANGUAGE PLPGSQL;
 	
-
-
+CREATE OR REPLACE FUNCTION wipe_texture_focus_base () RETURNS VOID AS $$
+	BEGIN
+		update texture set is_focus = false where is_focus = true;
+		delete from texture_f_base;
+		RAISE NOTICE 'Texture Focus Base wiped';
+		
+	END;$$
+	LANGUAGE PLPGSQL;
+	
+CREATE OR REPLACE FUNCTION wipe_color_focus_base () RETURNS VOID AS $$
+	BEGIN
+		update color set is_focus = false where is_focus = true;
+		delete from color_f_base;
+		RAISE NOTICE 'Color Focus Base wiped';
+		
+	END;$$
+	LANGUAGE PLPGSQL;
 	
 CREATE OR REPLACE FUNCTION rangeOmniShapeL1F1 (center_id integer, radius FLOAT8) RETURNS SETOF genericQuery AS $$
 	DECLARE rec_id RECORD; is_ok BOOLEAN := FALSE;feature_aux FLOAT8[]; distance FLOAT8; dist_fc FLOAT8; cand INTEGER := 0;
@@ -686,4 +701,339 @@ CREATE OR REPLACE FUNCTION rangeOmniShapeLInfF5 (center_id integer, radius FLOAT
 				
 	END;$$
 	LANGUAGE PLPGSQL;		
+
+CREATE OR REPLACE FUNCTION createTextureFocusBase(num integer)
+	RETURNS VOID AS $$
+
+	DECLARE fprev_id integer; fnext_id integer; distance float8; n_inserted integer := 0; border float8;
+		BEGIN
+		PERFORM wipe_texture_focus_base();
+			select id_ft into fprev_id from texture  -- SELECIONA UM DADO RANDOM
+			order by random()
+			LIMIT 1;
+			LOOP
+				select S2.id_ft, cube(S1.feature) <-> cube(S2.feature) as dist into fnext_id, distance from texture S1, texture S2 -- BASE CRIADA UTILIZANDO A DISTANCIA L2
+				where S1.id_ft = fprev_id AND S2.is_focus = 'False'
+				order by dist DESC
+				LIMIT 1;
+				
+				update texture
+				set is_focus = 'True'
+				where id_ft = fnext_id;
+				
+				n_inserted = n_inserted + 1;
+				num = num - 1;
+				RAISE NOTICE 'Num = %, n_inserted = %', num, n_inserted;
+				EXIT WHEN num = 0;
+				IF n_inserted = 2 THEN
+					select cube(S1.feature) <-> cube(S2.feature) into border from texture S1, texture S2  --CALCULA O VALOR DA BORDA
+					where S1.id_ft = fprev_id and S2.id_ft = fnext_id;
+					fprev_id = fnext_id;
+						
+					LOOP					
+						select S2.id_ft, abs(border - (cube(S1.feature) <-> cube(S2.feature))) as err into fnext_id, distance from texture S1, texture S2
+						where S1.id_ft = fprev_id AND S2.is_focus = 'False'
+						order by err ASC	-- minimiza o erro
+						LIMIT 1;
+						
+						update texture
+						set is_focus = 'True'
+						where id_ft = fnext_id;
+						
+						fprev_id = fnext_id;					
+						num = num - 1;
+						EXIT WHEN num <= 0;
+					END LOOP;
+				EXIT WHEN num = 0;
+				END IF;
+				
+				fprev_id = fnext_id;
+			END LOOP;
+			PERFORM insertTextureDistance();
+		END;$$
+	LANGUAGE PLPGSQL;	
+
+CREATE OR REPLACE FUNCTION rangeQueryTextureL1 (center_id integer, radius FLOAT8) RETURNS SETOF genericQuery AS $$
+
+	BEGIN
+
+		RETURN QUERY SELECT DISTINCT * FROM (SELECT T2.id_ft, (cube(T1.feature) <#> cube(T2.feature)) AS dist FROM TEXTURE T1, TEXTURE T2 WHERE T1.id_ft = center_id) as quer WHERE dist <= radius ORDER BY dist;
+		
+END;$$
+LANGUAGE PLPGSQL;
 	
+CREATE OR REPLACE FUNCTION rangeOmniTextureL1F1 (center_id integer, radius FLOAT8) RETURNS SETOF genericQuery AS $$
+	DECLARE rec_id RECORD; feature_aux FLOAT8[]; distance FLOAT8; dist_fc FLOAT8; cand INTEGER := 0;
+	BEGIN
+		
+		select T1.feature into feature_aux FROM Texture T1 where T1.id_ft = center_id;
+		select dist_l1 INTO dist_fc from TEXTURE_F_BASE where id_feature = center_id;
+		
+		
+		FOR rec_id IN SELECT id_feature from TEXTURE_F_BASE WHERE ((dist_l1 < (radius + dist_fc)) AND (dist_l1 > dist_fc - radius)) LOOP
+				cand = cand + 1;
+
+				select (cube(feature_aux) <#> cube(feature)) INTO distance FROM SHAPE T1 WHERE rec_id.id_feature = T1.id_ft ;
+				if (distance < radius) then
+					RETURN NEXT (rec_id.id_feature, distance);			       
+				end if;				
+		END LOOP;
+		
+	RAISE NOTICE 'Focos: 1  Podas: %', (24997-cand);
+				
+	END;$$
+	LANGUAGE PLPGSQL;
+
+CREATE OR REPLACE FUNCTION rangeOmniTextureL1F2 (center_id integer, radius FLOAT8) RETURNS SETOF genericQuery AS $$
+	DECLARE rec_id RECORD; feature_aux FLOAT8[]; distance FLOAT8; dist_fc FLOAT8[];
+	BEGIN
+		
+		select T1.feature into feature_aux FROM Texture T1 where T1.id_ft = center_id;
+		dist_fc = array(select distinct dist_l1 from TEXTURE_F_BASE where id_feature = center_id);
+		
+		
+		FOR rec_id IN SELECT id_feature from TEXTURE_F_BASE WHERE ((dist_l1 < (radius + dist_fc[1])) AND (dist_l1 > dist_fc[1] - radius)) INTERSECT
+		SELECT id_feature from TEXTURE_F_BASE WHERE ((dist_l1 < (radius + dist_fc[2])) AND (dist_l1 > dist_fc[2] - radius))	LOOP
+
+				select (cube(feature_aux) <#> cube(feature)) INTO distance FROM SHAPE T1 WHERE rec_id.id_feature = T1.id_ft ;
+				if (distance < radius) then
+					RETURN NEXT (rec_id.id_feature, distance);			       
+				end if;				
+		END LOOP;
+				
+	END;$$
+	LANGUAGE PLPGSQL;
+
+CREATE OR REPLACE FUNCTION rangeOmniTextureL1F3 (center_id integer, radius FLOAT8) RETURNS SETOF genericQuery AS $$
+	DECLARE rec_id RECORD; feature_aux FLOAT8[]; distance FLOAT8; dist_fc FLOAT8[];
+	BEGIN
+		
+		select T1.feature into feature_aux FROM Texture T1 where T1.id_ft = center_id;
+		dist_fc = array(select distinct dist_l1 from TEXTURE_F_BASE where id_feature = center_id);
+		
+		
+		FOR rec_id IN SELECT id_feature from TEXTURE_F_BASE WHERE ((dist_l1 < (radius + dist_fc[1])) AND (dist_l1 > dist_fc[1] - radius)) INTERSECT
+		SELECT id_feature from TEXTURE_F_BASE WHERE ((dist_l1 < (radius + dist_fc[2])) AND (dist_l1 > dist_fc[2] - radius))	INTERSECT
+		SELECT id_feature from TEXTURE_F_BASE WHERE ((dist_l1 < (radius + dist_fc[3])) AND (dist_l1 > dist_fc[3] - radius)) LOOP
+
+				select (cube(feature_aux) <#> cube(feature)) INTO distance FROM SHAPE T1 WHERE rec_id.id_feature = T1.id_ft ;
+				if (distance < radius) then
+					RETURN NEXT (rec_id.id_feature, distance);			       
+				end if;				
+		END LOOP;
+				
+	END;$$
+	LANGUAGE PLPGSQL;
+
+CREATE OR REPLACE FUNCTION rangeOmniTextureL1F4 (center_id integer, radius FLOAT8) RETURNS SETOF genericQuery AS $$
+	DECLARE rec_id RECORD; feature_aux FLOAT8[]; distance FLOAT8; dist_fc FLOAT8[];
+	BEGIN
+		
+		select T1.feature into feature_aux FROM Texture T1 where T1.id_ft = center_id;
+		dist_fc = array(select distinct dist_l1 from TEXTURE_F_BASE where id_feature = center_id);
+		
+		
+		FOR rec_id IN SELECT id_feature from TEXTURE_F_BASE WHERE ((dist_l1 < (radius + dist_fc[1])) AND (dist_l1 > dist_fc[1] - radius)) INTERSECT
+		SELECT id_feature from TEXTURE_F_BASE WHERE ((dist_l1 < (radius + dist_fc[2])) AND (dist_l1 > dist_fc[2] - radius))	INTERSECT
+		SELECT id_feature from TEXTURE_F_BASE WHERE ((dist_l1 < (radius + dist_fc[3])) AND (dist_l1 > dist_fc[3] - radius)) INTERSECT
+		SELECT id_feature from TEXTURE_F_BASE WHERE ((dist_l1 < (radius + dist_fc[4])) AND (dist_l1 > dist_fc[4] - radius)) LOOP
+
+				select (cube(feature_aux) <#> cube(feature)) INTO distance FROM SHAPE T1 WHERE rec_id.id_feature = T1.id_ft ;
+				if (distance < radius) then
+					RETURN NEXT (rec_id.id_feature, distance);			       
+				end if;				
+		END LOOP;
+				
+	END;$$
+	LANGUAGE PLPGSQL;	
+
+CREATE OR REPLACE FUNCTION rangeOmniTextureL1F5 (center_id integer, radius FLOAT8) RETURNS SETOF genericQuery AS $$
+	DECLARE rec_id RECORD; feature_aux FLOAT8[]; distance FLOAT8; dist_fc FLOAT8[];
+	BEGIN
+		
+		select T1.feature into feature_aux FROM Texture T1 where T1.id_ft = center_id;
+		dist_fc = array(select distinct dist_l1 from TEXTURE_F_BASE where id_feature = center_id);
+		
+		
+		FOR rec_id IN SELECT id_feature from TEXTURE_F_BASE WHERE ((dist_l1 < (radius + dist_fc[1])) AND (dist_l1 > dist_fc[1] - radius)) INTERSECT
+		SELECT id_feature from TEXTURE_F_BASE WHERE ((dist_l1 < (radius + dist_fc[2])) AND (dist_l1 > dist_fc[2] - radius))	INTERSECT
+		SELECT id_feature from TEXTURE_F_BASE WHERE ((dist_l1 < (radius + dist_fc[3])) AND (dist_l1 > dist_fc[3] - radius)) INTERSECT
+		SELECT id_feature from TEXTURE_F_BASE WHERE ((dist_l1 < (radius + dist_fc[4])) AND (dist_l1 > dist_fc[4] - radius)) INTERSECT
+		SELECT id_feature from TEXTURE_F_BASE WHERE ((dist_l1 < (radius + dist_fc[5])) AND (dist_l1 > dist_fc[5] - radius)) LOOP
+
+				select (cube(feature_aux) <#> cube(feature)) INTO distance FROM SHAPE T1 WHERE rec_id.id_feature = T1.id_ft ;
+				if (distance < radius) then
+					RETURN NEXT (rec_id.id_feature, distance);			       
+				end if;				
+		END LOOP;
+				
+	END;$$
+	LANGUAGE PLPGSQL;
+
+CREATE OR REPLACE FUNCTION createColorFocusBase(num integer)
+	RETURNS VOID AS $$
+
+	DECLARE fprev_id integer; fnext_id integer; distance float8; n_inserted integer := 0; border float8;
+		BEGIN
+		PERFORM wipe_color_focus_base();
+			select id_ft into fprev_id from color  -- SELECIONA UM DADO RANDOM
+			order by random()
+			LIMIT 1;
+			LOOP
+				select S2.id_ft, cube(S1.feature) <#> cube(S2.feature) as dist into fnext_id, distance from color S1, color S2 -- BASE CRIADA UTILIZANDO A DISTANCIA L1
+				where S1.id_ft = fprev_id AND S2.is_focus = 'False'
+				order by dist DESC
+				LIMIT 1;
+				
+				update color
+				set is_focus = 'True'
+				where id_ft = fnext_id;
+				
+				n_inserted = n_inserted + 1;
+				num = num - 1;
+				RAISE NOTICE 'Num = %, n_inserted = %', num, n_inserted;
+				EXIT WHEN num = 0;
+				IF n_inserted = 2 THEN
+					select cube(S1.feature) <#> cube(S2.feature) into border from color S1, color S2  --CALCULA O VALOR DA BORDA
+					where S1.id_ft = fprev_id and S2.id_ft = fnext_id;
+					fprev_id = fnext_id;
+						
+					LOOP					
+						select S2.id_ft, abs(border - (cube(S1.feature) <#> cube(S2.feature))) as err into fnext_id, distance from color S1, color S2
+						where S1.id_ft = fprev_id AND S2.is_focus = 'False'
+						order by err ASC	-- minimiza o erro
+						LIMIT 1;
+						
+						update color
+						set is_focus = 'True'
+						where id_ft = fnext_id;
+						
+						fprev_id = fnext_id;					
+						num = num - 1;
+						EXIT WHEN num <= 0;
+					END LOOP;
+				EXIT WHEN num = 0;
+				END IF;
+				
+				fprev_id = fnext_id;
+			END LOOP;
+			PERFORM insertColorDistance();
+		END;$$
+	LANGUAGE PLPGSQL;	
+	
+CREATE OR REPLACE FUNCTION rangeQueryCOLORL1 (center_id integer, radius FLOAT8) RETURNS SETOF genericQuery AS $$
+
+	BEGIN
+
+		RETURN QUERY SELECT DISTINCT * FROM (SELECT T2.id_ft, (cube(T1.feature) <#> cube(T2.feature)) AS dist FROM COLOR T1, COLOR T2 WHERE T1.id_ft = center_id) as quer WHERE dist <= radius ORDER BY dist;
+		
+END;$$
+LANGUAGE PLPGSQL;
+	
+CREATE OR REPLACE FUNCTION rangeOmniCOLORL1F1 (center_id integer, radius FLOAT8) RETURNS SETOF genericQuery AS $$
+	DECLARE rec_id RECORD; feature_aux FLOAT8[]; distance FLOAT8; dist_fc FLOAT8; cand INTEGER := 0;
+	BEGIN
+		
+		select T1.feature into feature_aux FROM COLOR T1 where T1.id_ft = center_id;
+		select dist_l1 INTO dist_fc from COLOR_F_BASE where id_feature = center_id;
+		
+		
+		FOR rec_id IN SELECT id_feature from COLOR_F_BASE WHERE ((dist_l1 < (radius + dist_fc)) AND (dist_l1 > dist_fc - radius)) LOOP
+				cand = cand + 1;
+
+				select (cube(feature_aux) <#> cube(feature)) INTO distance FROM SHAPE T1 WHERE rec_id.id_feature = T1.id_ft ;
+				if (distance < radius) then
+					RETURN NEXT (rec_id.id_feature, distance);			       
+				end if;				
+		END LOOP;
+		
+	RAISE NOTICE 'Focos: 1  Podas: %', (24997-cand);
+				
+	END;$$
+	LANGUAGE PLPGSQL;
+
+CREATE OR REPLACE FUNCTION rangeOmniCOLORL1F2 (center_id integer, radius FLOAT8) RETURNS SETOF genericQuery AS $$
+	DECLARE rec_id RECORD; feature_aux FLOAT8[]; distance FLOAT8; dist_fc FLOAT8[]; cand INTEGER := 0;
+	BEGIN
+		
+		select T1.feature into feature_aux FROM COLOR T1 where T1.id_ft = center_id;
+		dist_fc = array(select distinct dist_l1 from COLOR_F_BASE where id_feature = center_id);
+		
+		
+		FOR rec_id IN SELECT id_feature from COLOR_F_BASE WHERE ((dist_l1 < (radius + dist_fc[1])) AND (dist_l1 > dist_fc[1] - radius)) INTERSECT
+		SELECT id_feature from COLOR_F_BASE WHERE ((dist_l1 < (radius + dist_fc[2])) AND (dist_l1 > dist_fc[2] - radius))	LOOP
+				cand = cand + 1;
+				select (cube(feature_aux) <#> cube(feature)) INTO distance FROM SHAPE T1 WHERE rec_id.id_feature = T1.id_ft ;
+				if (distance < radius) then
+					RETURN NEXT (rec_id.id_feature, distance);			       
+				end if;				
+		END LOOP;
+	RAISE NOTICE 'Focos: 2  Podas: %', (24997-cand);			
+	END;$$
+	LANGUAGE PLPGSQL;
+
+CREATE OR REPLACE FUNCTION rangeOmniCOLORL1F3 (center_id integer, radius FLOAT8) RETURNS SETOF genericQuery AS $$
+	DECLARE rec_id RECORD; feature_aux FLOAT8[]; distance FLOAT8; dist_fc FLOAT8[];
+	BEGIN
+		
+		select T1.feature into feature_aux FROM COLOR T1 where T1.id_ft = center_id;
+		dist_fc = array(select distinct dist_l1 from COLOR_F_BASE where id_feature = center_id);
+		
+		
+		FOR rec_id IN SELECT id_feature from COLOR_F_BASE WHERE ((dist_l1 < (radius + dist_fc[1])) AND (dist_l1 > dist_fc[1] - radius)) INTERSECT
+		SELECT id_feature from COLOR_F_BASE WHERE ((dist_l1 < (radius + dist_fc[2])) AND (dist_l1 > dist_fc[2] - radius))	INTERSECT
+		SELECT id_feature from COLOR_F_BASE WHERE ((dist_l1 < (radius + dist_fc[3])) AND (dist_l1 > dist_fc[3] - radius)) LOOP
+
+				select (cube(feature_aux) <#> cube(feature)) INTO distance FROM SHAPE T1 WHERE rec_id.id_feature = T1.id_ft ;
+				if (distance < radius) then
+					RETURN NEXT (rec_id.id_feature, distance);			       
+				end if;				
+		END LOOP;
+				
+	END;$$
+	LANGUAGE PLPGSQL;
+
+CREATE OR REPLACE FUNCTION rangeOmniCOLORL1F4 (center_id integer, radius FLOAT8) RETURNS SETOF genericQuery AS $$
+	DECLARE rec_id RECORD; feature_aux FLOAT8[]; distance FLOAT8; dist_fc FLOAT8[];
+	BEGIN
+		
+		select T1.feature into feature_aux FROM COLOR T1 where T1.id_ft = center_id;
+		dist_fc = array(select distinct dist_l1 from COLOR_F_BASE where id_feature = center_id);
+		
+		
+		FOR rec_id IN SELECT id_feature from COLOR_F_BASE WHERE ((dist_l1 < (radius + dist_fc[1])) AND (dist_l1 > dist_fc[1] - radius)) INTERSECT
+		SELECT id_feature from COLOR_F_BASE WHERE ((dist_l1 < (radius + dist_fc[2])) AND (dist_l1 > dist_fc[2] - radius))	INTERSECT
+		SELECT id_feature from COLOR_F_BASE WHERE ((dist_l1 < (radius + dist_fc[3])) AND (dist_l1 > dist_fc[3] - radius)) INTERSECT
+		SELECT id_feature from COLOR_F_BASE WHERE ((dist_l1 < (radius + dist_fc[4])) AND (dist_l1 > dist_fc[4] - radius)) LOOP
+
+				select (cube(feature_aux) <#> cube(feature)) INTO distance FROM SHAPE T1 WHERE rec_id.id_feature = T1.id_ft ;
+				if (distance < radius) then
+					RETURN NEXT (rec_id.id_feature, distance);			       
+				end if;				
+		END LOOP;
+				
+	END;$$
+	LANGUAGE PLPGSQL;	
+
+CREATE OR REPLACE FUNCTION rangeOmniCOLORL1F5 (center_id integer, radius FLOAT8) RETURNS SETOF genericQuery AS $$
+	DECLARE rec_id RECORD; feature_aux FLOAT8[]; distance FLOAT8; dist_fc FLOAT8[];
+	BEGIN
+		
+		select T1.feature into feature_aux FROM COLOR T1 where T1.id_ft = center_id;
+		dist_fc = array(select distinct dist_l1 from COLOR_F_BASE where id_feature = center_id);
+		
+		
+		FOR rec_id IN SELECT id_feature from COLOR_F_BASE WHERE ((dist_l1 < (radius + dist_fc[1])) AND (dist_l1 > dist_fc[1] - radius)) INTERSECT
+		SELECT id_feature from COLOR_F_BASE WHERE ((dist_l1 < (radius + dist_fc[2])) AND (dist_l1 > dist_fc[2] - radius))	INTERSECT
+		SELECT id_feature from COLOR_F_BASE WHERE ((dist_l1 < (radius + dist_fc[3])) AND (dist_l1 > dist_fc[3] - radius)) INTERSECT
+		SELECT id_feature from COLOR_F_BASE WHERE ((dist_l1 < (radius + dist_fc[4])) AND (dist_l1 > dist_fc[4] - radius)) INTERSECT
+		SELECT id_feature from COLOR_F_BASE WHERE ((dist_l1 < (radius + dist_fc[5])) AND (dist_l1 > dist_fc[5] - radius)) LOOP
+
+				select (cube(feature_aux) <#> cube(feature)) INTO distance FROM SHAPE T1 WHERE rec_id.id_feature = T1.id_ft ;
+				if (distance < radius) then
+					RETURN NEXT (rec_id.id_feature, distance);			       
+				end if;				
+		END LOOP;
+				
+	END;$$
+	LANGUAGE PLPGSQL;
